@@ -60,10 +60,7 @@ func (t *Topic) SetScoreParams(p *TopicScoreParams) error {
 			return
 		}
 
-		gs.score.Lock()
-		defer gs.score.Unlock()
-
-		gs.score.params.Topics[t.topic] = p
+		gs.score.SetTopicScoreParams(t.topic, p)
 		result <- nil
 	}:
 		err = <-result

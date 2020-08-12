@@ -182,6 +182,14 @@ func newPeerScore(params *PeerScoreParams) *peerScore {
 	}
 }
 
+// update interface
+func (ps *peerScore) SetTopicScoreParams(topic string, p *TopicScoreParams) {
+	// Note: assumes that the topic score parameters have already been validated
+	ps.Lock()
+	defer ps.Unlock()
+	ps.params.Topics[topic] = p
+}
+
 // router interface
 func (ps *peerScore) Start(gs *GossipSubRouter) {
 	if ps == nil {
