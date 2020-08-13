@@ -60,8 +60,7 @@ func (t *Topic) SetScoreParams(p *TopicScoreParams) error {
 			return
 		}
 
-		gs.score.SetTopicScoreParams(t.topic, p)
-		result <- nil
+		result <- gs.score.SetTopicScoreParams(t.topic, p)
 	}:
 		err = <-result
 		return err

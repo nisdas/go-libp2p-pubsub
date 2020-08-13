@@ -183,11 +183,17 @@ func newPeerScore(params *PeerScoreParams) *peerScore {
 }
 
 // update interface
-func (ps *peerScore) SetTopicScoreParams(topic string, p *TopicScoreParams) {
+func (ps *peerScore) SetTopicScoreParams(topic string, p *TopicScoreParams) error {
 	// Note: assumes that the topic score parameters have already been validated
 	ps.Lock()
 	defer ps.Unlock()
+	_, exist := ps.params.Topics[topic]
+	if exist {
+		return fmt.Errorf("Duplicate topic score parameters for topic %s", topic)
+	}
+
 	ps.params.Topics[topic] = p
+	return nil
 }
 
 // router interface
