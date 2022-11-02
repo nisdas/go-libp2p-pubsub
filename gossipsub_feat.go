@@ -18,6 +18,8 @@ const (
 	GossipSubFeatureMesh = iota
 	// Protocol supports Peer eXchange on prune -- gossipsub-v1.1 compatible
 	GossipSubFeaturePX
+	// Protocol supports episub -- gossipsub-v1.2 compatible
+	GossipSubFeatureEpi
 )
 
 // GossipSubDefaultProtocols is the default gossipsub router protocol list
@@ -30,6 +32,19 @@ func GossipSubDefaultFeatures(feat GossipSubFeature, proto protocol.ID) bool {
 		return proto == GossipSubID_v11 || proto == GossipSubID_v10
 	case GossipSubFeaturePX:
 		return proto == GossipSubID_v11
+	default:
+		return false
+	}
+}
+
+func GossipSubFeaturesWithEpisub(feat GossipSubFeature, proto protocol.ID) bool {
+	switch feat {
+	case GossipSubFeatureMesh:
+		return proto == GossipSubID_v12 || proto == GossipSubID_v11 || proto == GossipSubID_v10
+	case GossipSubFeaturePX:
+		return proto == GossipSubID_v12 || proto == GossipSubID_v11
+	case GossipSubFeatureEpi:
+		return proto == GossipSubID_v12
 	default:
 		return false
 	}

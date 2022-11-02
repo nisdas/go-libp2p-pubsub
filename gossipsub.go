@@ -26,6 +26,10 @@ const (
 	// See the spec for details about how v1.1.0 compares to v1.0.0:
 	// https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md
 	GossipSubID_v11 = protocol.ID("/meshsub/1.1.0")
+
+	// GossipSubID_v12 is the protocol ID for version 1.2.0 of the GossipSub protocol.
+	// This version of the protocol upgrades the router support episub.
+	GossipSubID_v12 = protocol.ID("/meshsub/1.2.0")
 )
 
 // Defines the default gossipsub parameters.
@@ -271,6 +275,20 @@ func DefaultGossipSubParams() GossipSubParams {
 		MaxIHaveMessages:          GossipSubMaxIHaveMessages,
 		IWantFollowupTime:         GossipSubIWantFollowupTime,
 		SlowHeartbeatWarning:      0.1,
+	}
+}
+
+func WithEpisub() Option {
+	return func(ps *PubSub) error {
+		gs, ok := ps.rt.(*GossipSubRouter)
+		if !ok {
+			return fmt.Errorf("pubsub router is not gossipsub")
+		}
+
+		gs.protos = append([]protocol.ID{GossipSubID_v12}, GossipSubDefaultProtocols...)
+		gs.feature = GossipSubFeaturesWithEpisub
+
+		return nil
 	}
 }
 
