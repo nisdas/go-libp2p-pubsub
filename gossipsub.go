@@ -39,13 +39,20 @@ var (
 	GossipSubDhi                              = 12
 	GossipSubDscore                           = 4
 	GossipSubDout                             = 2
+	GossipSubDmaxAdd                          = 1
+	GossipSubDnonChoke                        = 5
+	GossipSubDlazy                            = 6
 	GossipSubHistoryLength                    = 5
 	GossipSubHistoryGossip                    = 3
-	GossipSubDlazy                            = 6
 	GossipSubGossipFactor                     = 0.25
 	GossipSubGossipRetransmission             = 3
 	GossipSubHeartbeatInitialDelay            = 100 * time.Millisecond
 	GossipSubHeartbeatInterval                = 1 * time.Second
+	GossipSubChokeHeartBeatInterval           = 20
+	GossipSubChokeDuplicatesThreshold         = 0.60
+	GossipSubChokeChurn                       = 2
+	GossipSubUnChokeThreshold                 = 0.50
+	GossipSubFanoutAdditionThreshold          = 0.10
 	GossipSubFanoutTTL                        = 60 * time.Second
 	GossipSubPrunePeers                       = 16
 	GossipSubPruneBackoff                     = time.Minute
@@ -94,6 +101,13 @@ type GossipSubParams struct {
 	// Dout must be set below Dlo, and must not exceed D / 2.
 	Dout int
 
+	// Dnonchoke is the minimum number of peers in a mesh that must remain unchoked.
+	DnonChoke int
+
+	// DmaxAdd is the maximum number of peers to add into the mesh (from fanout)
+	// if they are performing well per ChokeHeartbeatInterval.
+	DmaxAdd int
+
 	// gossip parameters
 
 	// HistoryLength controls the size of the message cache used for gossip.
@@ -134,6 +148,28 @@ type GossipSubParams struct {
 
 	// HeartbeatInterval controls the time between heartbeats.
 	HeartbeatInterval time.Duration
+
+	// ChokeHeartbeatInterval is the number of heartbeats before assessing and applying
+	// CHOKE/UNCHOKE control messages and adding DmaxAdd.
+	ChokeHeartbeatInterval int
+
+	// ChokeDuplicatesThreshold is the minimum number of duplicates as a percentage of
+	// received messages a peer must send before being eligible of being choked.
+	ChokeDuplicatesThreshold float64
+
+	// ChokeChurn is the maximum number of peers that can be choked or
+	// unchoked in any ChokeHeartbeatInterval.
+	ChokeChurn int
+
+	// UnchokeThreshold determines how aggressively we unchoke peers. The percentage of
+	// messages that we receive in the ChokeHeartbeatInterval that were received by gossip from
+	// a choked peer.
+	UnchokeThreshold float64
+
+	// FanoutAdditionThreshold determines how aggressively we add peers from the fanout into
+	// the mesh. The percentage of messages that we receive in the ChokeHeartbeatInterval that
+	// were received from a fanout peer.
+	FanoutAdditionThreshold float64
 
 	// SlowHeartbeatWarning is the duration threshold for heartbeat processing before emitting
 	// a warning; this would be indicative of an overloaded peer.
@@ -252,6 +288,8 @@ func DefaultGossipSubParams() GossipSubParams {
 		Dhi:                       GossipSubDhi,
 		Dscore:                    GossipSubDscore,
 		Dout:                      GossipSubDout,
+		DnonChoke:                 GossipSubDnonChoke,
+		DmaxAdd:                   GossipSubDmaxAdd,
 		HistoryLength:             GossipSubHistoryLength,
 		HistoryGossip:             GossipSubHistoryGossip,
 		Dlazy:                     GossipSubDlazy,
@@ -259,6 +297,11 @@ func DefaultGossipSubParams() GossipSubParams {
 		GossipRetransmission:      GossipSubGossipRetransmission,
 		HeartbeatInitialDelay:     GossipSubHeartbeatInitialDelay,
 		HeartbeatInterval:         GossipSubHeartbeatInterval,
+		ChokeHeartbeatInterval:    GossipSubChokeHeartBeatInterval,
+		ChokeChurn:                GossipSubChokeChurn,
+		ChokeDuplicatesThreshold:  GossipSubChokeDuplicatesThreshold,
+		UnchokeThreshold:          GossipSubUnChokeThreshold,
+		FanoutAdditionThreshold:   GossipSubFanoutAdditionThreshold,
 		FanoutTTL:                 GossipSubFanoutTTL,
 		PrunePeers:                GossipSubPrunePeers,
 		PruneBackoff:              GossipSubPruneBackoff,
