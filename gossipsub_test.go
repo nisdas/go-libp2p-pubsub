@@ -1780,7 +1780,7 @@ func TestGossipsubMultipleGraftTopics(t *testing.T) {
 
 	// Send multiple GRAFT messages to second peer from
 	// 1st peer
-	p1Router.sendGraftPrune(map[peer.ID][]string{
+	p1Router.sendGraftPruneChoke(map[peer.ID][]string{
 		secondPeer: {firstTopic, secondTopic, thirdTopic},
 	}, map[peer.ID][]string{}, map[peer.ID]bool{})
 
@@ -2325,7 +2325,7 @@ func (iwe *iwantEverything) handleStream(s network.Stream) {
 				}
 			}
 
-			out := rpcWithControl(nil, nil, iwants, nil, prunes)
+			out := rpcWithControl(nil, nil, iwants, nil, prunes, nil, nil)
 			err = w.WriteMsg(out)
 			if err != nil {
 				panic(err)

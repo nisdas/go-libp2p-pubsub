@@ -1118,6 +1118,7 @@ func (p *PubSub) pushMsg(msg *Message) {
 	id := p.idGen.ID(msg)
 	if p.seenMessage(id) {
 		p.tracer.DuplicateMessage(msg)
+		addToDuplicates(p.rt, msg, id)
 		return
 	}
 
@@ -1126,6 +1127,7 @@ func (p *PubSub) pushMsg(msg *Message) {
 	}
 
 	if p.markSeen(id) {
+		recordFirstDelivery(p.rt, msg, id)
 		p.publishMessage(msg)
 	}
 }

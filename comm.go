@@ -191,19 +191,17 @@ func rpcWithMessages(msgs ...*pb.Message) *RPC {
 	return &RPC{RPC: pb.RPC{Publish: msgs}}
 }
 
-func rpcWithControl(msgs []*pb.Message,
-	ihave []*pb.ControlIHave,
-	iwant []*pb.ControlIWant,
-	graft []*pb.ControlGraft,
-	prune []*pb.ControlPrune) *RPC {
+func rpcWithControl(msgs []*pb.Message, ihave []*pb.ControlIHave, iwant []*pb.ControlIWant, graft []*pb.ControlGraft, prune []*pb.ControlPrune, choke []*pb.ControlChoke, unchoke []*pb.ControlUnChoke) *RPC {
 	return &RPC{
 		RPC: pb.RPC{
 			Publish: msgs,
 			Control: &pb.ControlMessage{
-				Ihave: ihave,
-				Iwant: iwant,
-				Graft: graft,
-				Prune: prune,
+				Ihave:   ihave,
+				Iwant:   iwant,
+				Graft:   graft,
+				Prune:   prune,
+				Choke:   choke,
+				Unchoke: unchoke,
 			},
 		},
 	}
