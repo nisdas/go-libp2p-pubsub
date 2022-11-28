@@ -51,6 +51,7 @@ var (
 	GossipSubChokeHeartBeatInterval           = 20
 	GossipSubChokeDuplicatesThreshold         = 0.60
 	GossipSubChokeChurn                       = 2
+	GossipSubUnchokeChurn                     = 2
 	GossipSubUnChokeThreshold                 = 0.50
 	GossipSubFanoutAdditionThreshold          = 0.10
 	GossipSubFanoutTTL                        = 60 * time.Second
@@ -161,6 +162,10 @@ type GossipSubParams struct {
 	// unchoked in any ChokeHeartbeatInterval.
 	ChokeChurn int
 
+	// UnchokeChurn is the maximum number of peers that can be choked or
+	// unchoked in any ChokeHeartbeatInterval.
+	UnchokeChurn int
+
 	// UnchokeThreshold determines how aggressively we unchoke peers. The percentage of
 	// messages that we receive in the ChokeHeartbeatInterval that were received by gossip from
 	// a choked peer.
@@ -260,23 +265,23 @@ func NewGossipSubWithRouter(ctx context.Context, h host.Host, rt PubSubRouter, o
 func DefaultGossipSubRouter(h host.Host) *GossipSubRouter {
 	params := DefaultGossipSubParams()
 	return &GossipSubRouter{
-		peers:      make(map[peer.ID]protocol.ID),
-		mesh:       make(map[string]map[peer.ID]struct{}),
-		fanout:     make(map[string]map[peer.ID]struct{}),
-		lastpub:    make(map[string]int64),
-		gossip:     make(map[peer.ID][]*pb.ControlIHave),
-		control:    make(map[peer.ID]*pb.ControlMessage),
-		backoff:    make(map[string]map[peer.ID]time.Time),
-		peerhave:   make(map[peer.ID]int),
-		iasked:     make(map[peer.ID]int),
-		duplicates: make(map[peer.ID]int),
-		outbound:   make(map[peer.ID]bool),
-		connect:    make(chan connectInfo, params.MaxPendingConnections),
-		mcache:     NewMessageCache(params.HistoryGossip, params.HistoryLength),
-		protos:     GossipSubDefaultProtocols,
-		feature:    GossipSubDefaultFeatures,
-		tagTracer:  newTagTracer(h.ConnManager()),
-		params:     params,
+		peers:           make(map[peer.ID]protocol.ID),
+		mesh:            make(map[string]map[peer.ID]struct{}),
+		fanout:          make(map[string]map[peer.ID]struct{}),
+		lastpub:         make(map[string]int64),
+		gossip:          make(map[peer.ID][]*pb.ControlIHave),
+		control:         make(map[peer.ID]*pb.ControlMessage),
+		backoff:         make(map[string]map[peer.ID]time.Time),
+		peerhave:        make(map[peer.ID]int),
+		iasked:          make(map[peer.ID]int),
+		deliveryTracker: NewDeliveryTracker(),
+		outbound:        make(map[peer.ID]bool),
+		connect:         make(chan connectInfo, params.MaxPendingConnections),
+		mcache:          NewMessageCache(params.HistoryGossip, params.HistoryLength),
+		protos:          GossipSubDefaultProtocols,
+		feature:         GossipSubDefaultFeatures,
+		tagTracer:       newTagTracer(h.ConnManager()),
+		params:          params,
 	}
 }
 
@@ -300,8 +305,7 @@ func DefaultGossipSubParams() GossipSubParams {
 		HeartbeatInterval:         GossipSubHeartbeatInterval,
 		ChokeHeartbeatInterval:    GossipSubChokeHeartBeatInterval,
 		ChokeChurn:                GossipSubChokeChurn,
-		ChokeDuplicatesThreshold:  GossipSubChokeDuplicatesThreshold,
-		UnchokeThreshold:          GossipSubUnChokeThreshold,
+		UnchokeChurn:              GossipSubUnchokeChurn,
 		FanoutAdditionThreshold:   GossipSubFanoutAdditionThreshold,
 		FanoutTTL:                 GossipSubFanoutTTL,
 		PrunePeers:                GossipSubPrunePeers,
@@ -480,33 +484,30 @@ func WithGossipSubParams(cfg GossipSubParams) Option {
 // is the fanout map. Fanout peer lists are expired if we don't publish any
 // messages to their topic for GossipSubFanoutTTL.
 type GossipSubRouter struct {
-	p                 *PubSub
-	peers             map[peer.ID]protocol.ID         // peer protocols
-	direct            map[peer.ID]struct{}            // direct peers
-	mesh              map[string]map[peer.ID]struct{} // topic meshes
-	fanout            map[string]map[peer.ID]struct{} // topic fanout
-	lastpub           map[string]int64                // last publish time for fanout topics
-	gossip            map[peer.ID][]*pb.ControlIHave  // pending gossip
-	control           map[peer.ID]*pb.ControlMessage  // pending control messages
-	peerhave          map[peer.ID]int                 // number of IHAVEs received from peer in the last heartbeat
-	iasked            map[peer.ID]int                 // number of messages we have asked from peer in the last heartbeat
-	duplicates        map[peer.ID]int                 // number of duplicate messages received from the peer.
-	duplicateLatency  map[peer.ID]time.Duration
-	firstDeliveries   map[peer.ID]int
-	firstDeliveryTime map[string]time.Time
-	outbound          map[peer.ID]bool                 // connection direction cache, marks peers with outbound connections
-	backoff           map[string]map[peer.ID]time.Time // prune backoff
-	connect           chan connectInfo                 // px connection requests
+	p        *PubSub
+	peers    map[peer.ID]protocol.ID          // peer protocols
+	direct   map[peer.ID]struct{}             // direct peers
+	mesh     map[string]map[peer.ID]struct{}  // topic meshes
+	fanout   map[string]map[peer.ID]struct{}  // topic fanout
+	lastpub  map[string]int64                 // last publish time for fanout topics
+	gossip   map[peer.ID][]*pb.ControlIHave   // pending gossip
+	control  map[peer.ID]*pb.ControlMessage   // pending control messages
+	peerhave map[peer.ID]int                  // number of IHAVEs received from peer in the last heartbeat
+	iasked   map[peer.ID]int                  // number of messages we have asked from peer in the last heartbeat
+	outbound map[peer.ID]bool                 // connection direction cache, marks peers with outbound connections
+	backoff  map[string]map[peer.ID]time.Time // prune backoff
+	connect  chan connectInfo                 // px connection requests
 
 	protos  []protocol.ID
 	feature GossipSubFeatureTest
 
-	mcache       *MessageCache
-	tracer       *pubsubTracer
-	score        *peerScore
-	gossipTracer *gossipTracer
-	tagTracer    *tagTracer
-	gate         *peerGater
+	mcache          *MessageCache
+	tracer          *pubsubTracer
+	score           *peerScore
+	gossipTracer    *gossipTracer
+	tagTracer       *tagTracer
+	gate            *peerGater
+	deliveryTracker *deliveryTracker
 
 	// config for gossipsub parameters
 	params GossipSubParams
@@ -684,6 +685,8 @@ func (gs *GossipSubRouter) HandleRPC(rpc *RPC) {
 	ihave := gs.handleIWant(rpc.from, ctl)
 	prune := gs.handleGraft(rpc.from, ctl)
 	gs.handlePrune(rpc.from, ctl)
+	gs.handleChoke(rpc.from, ctl)
+	gs.handleUnchoke(rpc.from, ctl)
 
 	if len(iwant) == 0 && len(ihave) == 0 && len(prune) == 0 {
 		return
@@ -727,7 +730,13 @@ func (gs *GossipSubRouter) handleIHave(p peer.ID, ctl *pb.ControlMessage) []*pb.
 
 		for _, mid := range ihave.GetMessageIDs() {
 			if gs.p.seenMessage(mid) {
+				if gs.feature(GossipSubFeatureEpi, gs.peers[p]) && gs.deliveryTracker.isChokedFromLocalPeer(p, topic) {
+					gs.deliveryTracker.duplicateIhaves[p][topic]++
+				}
 				continue
+			}
+			if gs.feature(GossipSubFeatureEpi, gs.peers[p]) && gs.deliveryTracker.isChokedFromLocalPeer(p, topic) {
+				gs.deliveryTracker.firstIhaves[p][topic]++
 			}
 			iwant[mid] = struct{}{}
 		}
@@ -936,6 +945,42 @@ func (gs *GossipSubRouter) handlePrune(p peer.ID, ctl *pb.ControlMessage) {
 	}
 }
 
+func (gs *GossipSubRouter) handleChoke(p peer.ID, ctl *pb.ControlMessage) {
+
+	for _, choke := range ctl.GetChoke() {
+		topic := choke.GetTopicID()
+		peers, ok := gs.mesh[topic]
+		if !ok {
+			continue
+		}
+		_, ok = peers[p]
+		if !ok {
+			continue
+		}
+
+		log.Debugf("CHOKE: Received Choke from %s in %s", p, topic)
+		gs.deliveryTracker.chokedFromPeer(p, topic)
+	}
+}
+
+func (gs *GossipSubRouter) handleUnchoke(p peer.ID, ctl *pb.ControlMessage) {
+
+	for _, choke := range ctl.GetUnchoke() {
+		topic := choke.GetTopicID()
+		peers, ok := gs.mesh[topic]
+		if !ok {
+			continue
+		}
+		_, ok = peers[p]
+		if !ok {
+			continue
+		}
+
+		log.Debugf("UNCHOKE: Received Unchoke from %s in %s", p, topic)
+		gs.deliveryTracker.unChokedFromPeer(p, topic)
+	}
+}
+
 func (gs *GossipSubRouter) addBackoff(p peer.ID, topic string, isUnsubscribe bool) {
 	backoff := gs.params.PruneBackoff
 	if isUnsubscribe {
@@ -1102,7 +1147,7 @@ func (gs *GossipSubRouter) Publish(msg *Message) {
 
 	out := rpcWithMessages(msg.Message)
 	for pid := range tosend {
-		if pid == from || pid == peer.ID(msg.GetFrom()) {
+		if pid == from || pid == peer.ID(msg.GetFrom()) || gs.deliveryTracker.isChokedFromRemotePeer(pid, *msg.Topic) {
 			continue
 		}
 
@@ -1424,6 +1469,7 @@ func (gs *GossipSubRouter) heartbeat() {
 	tograft := make(map[peer.ID][]string)
 	toprune := make(map[peer.ID][]string)
 	tochoke := make(map[peer.ID][]string)
+	tounchoke := make(map[peer.ID][]string)
 	noPX := make(map[peer.ID]bool)
 
 	// clean up expired backoffs
@@ -1664,28 +1710,14 @@ func (gs *GossipSubRouter) heartbeat() {
 
 	// Send CHOKE messages to slower peers.
 	if int(gs.heartbeatTicks)%gs.params.ChokeHeartbeatInterval == 0 {
-		peersToChoke := []peer.ID{}
-
-		for k, v := range gs.duplicates {
-			totalMessages := gs.firstDeliveries[k] + v
-			duplicatePercentage := float64(v) / float64(totalMessages)
-			if duplicatePercentage > gs.params.ChokeDuplicatesThreshold {
-				copiedId := k
-				peersToChoke = append(peersToChoke, copiedId)
-			}
-		}
-		// Sort slice in descending order.
-		sort.Slice(peersToChoke, func(i, j int) bool {
-			return gs.duplicateLatency[peersToChoke[i]] > gs.duplicateLatency[peersToChoke[j]]
-		})
-		if len(peersToChoke) > gs.params.ChokeChurn {
-			peersToChoke = peersToChoke[:gs.params.ChokeChurn]
-		}
-		// TODO(Add topic records)
+		tochoke = gs.deliveryTracker.viableForChoking(gs.params)
+		gs.deliveryTracker.chokePeers(tochoke)
+		tounchoke = gs.deliveryTracker.viableForUnchoking(gs.params)
+		gs.deliveryTracker.unChokePeers(tounchoke)
 	}
 
 	// send coalesced GRAFT/PRUNE messages (will piggyback gossip)
-	gs.sendGraftPruneChoke(tograft, toprune, tochoke, noPX)
+	gs.sendGraftPruneChoke(tograft, toprune, tochoke, tounchoke, noPX)
 
 	// flush all pending gossip that wasn't piggybacked above
 	gs.flush()
@@ -1758,20 +1790,7 @@ func (gs *GossipSubRouter) directConnect() {
 	}
 }
 
-func (gs *GossipSubRouter) sendGraftPruneChoke(tograft, toprune, tochoke map[peer.ID][]string, noPX map[peer.ID]bool) {
-
-	var getChoke = func(p peer.ID) []*pb.ControlChoke {
-		choke := make([]*pb.ControlChoke, 0, len(tochoke[p]))
-		for i, topic := range tochoke[p] {
-			// copy topic string here since
-			// the reference to the string
-			// topic here changes with every
-			// iteration of the slice.
-			copiedID := topic
-			choke = append(choke, &pb.ControlChoke{TopicID: &copiedID})
-		}
-		return choke
-	}
+func (gs *GossipSubRouter) sendGraftPruneChoke(tograft, toprune, tochoke, tounchoke map[peer.ID][]string, noPX map[peer.ID]bool) {
 
 	for p, topics := range tograft {
 		graft := make([]*pb.ControlGraft, 0, len(topics))
@@ -1794,7 +1813,7 @@ func (gs *GossipSubRouter) sendGraftPruneChoke(tograft, toprune, tochoke map[pee
 			}
 		}
 
-		out := rpcWithControl(nil, nil, nil, graft, prune, getChoke(p), nil)
+		out := rpcWithControl(nil, nil, nil, graft, prune, nil, nil)
 		gs.sendRPC(p, out)
 	}
 
@@ -1804,7 +1823,37 @@ func (gs *GossipSubRouter) sendGraftPruneChoke(tograft, toprune, tochoke map[pee
 			prune = append(prune, gs.makePrune(p, topic, gs.doPX && !noPX[p], false))
 		}
 
-		out := rpcWithControl(nil, nil, nil, nil, prune, getChoke(p), nil)
+		out := rpcWithControl(nil, nil, nil, nil, prune, nil, nil)
+		gs.sendRPC(p, out)
+	}
+
+	for p, topics := range tochoke {
+		choke := make([]*pb.ControlChoke, 0, len(topics))
+		for _, topic := range topics {
+			// copy topic string here since
+			// the reference to the string
+			// topic here changes with every
+			// iteration of the slice.
+			copiedID := topic
+			choke = append(choke, &pb.ControlChoke{TopicID: &copiedID})
+		}
+
+		out := rpcWithControl(nil, nil, nil, nil, nil, choke, nil)
+		gs.sendRPC(p, out)
+	}
+
+	for p, topics := range tounchoke {
+		unchoke := make([]*pb.ControlUnChoke, 0, len(topics))
+		for _, topic := range topics {
+			// copy topic string here since
+			// the reference to the string
+			// topic here changes with every
+			// iteration of the slice.
+			copiedID := topic
+			unchoke = append(unchoke, &pb.ControlUnChoke{TopicID: &copiedID})
+		}
+
+		out := rpcWithControl(nil, nil, nil, nil, nil, nil, unchoke)
 		gs.sendRPC(p, out)
 	}
 }
@@ -2038,11 +2087,7 @@ func addToDuplicates(rt PubSubRouter, msg *Message, id string) {
 	if !grt.feature(GossipSubFeatureEpi, grt.peers[msg.ReceivedFrom]) {
 		return
 	}
-	totalDur := grt.duplicateLatency[msg.ReceivedFrom] * time.Duration(grt.duplicates[msg.ReceivedFrom])
-	msgLatency := time.Since(grt.firstDeliveryTime[id])
-	totalDur += msgLatency
-	grt.duplicates[msg.ReceivedFrom]++
-	grt.duplicateLatency[msg.ReceivedFrom] = totalDur / time.Duration(grt.duplicates[msg.ReceivedFrom])
+	grt.deliveryTracker.addDuplicate(msg, id)
 }
 
 func recordFirstDelivery(rt PubSubRouter, msg *Message, id string) {
@@ -2054,8 +2099,7 @@ func recordFirstDelivery(rt PubSubRouter, msg *Message, id string) {
 	if grt.protos[0] != GossipSubID_v12 {
 		return
 	}
-	grt.firstDeliveries[msg.ReceivedFrom]++
-	grt.firstDeliveryTime[id] = time.Now()
+	grt.deliveryTracker.addFirstDelivery(msg, id)
 }
 
 func peerListToMap(peers []peer.ID) map[peer.ID]struct{} {

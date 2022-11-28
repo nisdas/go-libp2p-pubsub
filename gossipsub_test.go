@@ -1782,7 +1782,7 @@ func TestGossipsubMultipleGraftTopics(t *testing.T) {
 	// 1st peer
 	p1Router.sendGraftPruneChoke(map[peer.ID][]string{
 		secondPeer: {firstTopic, secondTopic, thirdTopic},
-	}, map[peer.ID][]string{}, map[peer.ID]bool{})
+	}, map[peer.ID][]string{}, map[peer.ID]bool{}, nil)
 
 	time.Sleep(time.Second * 1)
 
