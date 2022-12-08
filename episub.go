@@ -107,8 +107,18 @@ func (d *deliveryTracker) addDuplicate(msg *Message, id string) {
 	totalDur := d.duplicateLatency[msg.ReceivedFrom][topic] * time.Duration(d.duplicates[msg.ReceivedFrom][topic])
 	msgLatency := time.Since(d.firstDeliveryTime[id])
 	totalDur += msgLatency
-	d.duplicates[msg.ReceivedFrom][topic]++
-	d.duplicateLatency[msg.ReceivedFrom][topic] = totalDur / time.Duration(d.duplicates[msg.ReceivedFrom][topic])
+	peerMap, ok := d.duplicates[msg.ReceivedFrom]
+	if !ok {
+		peerMap = map[string]int{}
+	}
+	peerMap[topic]++
+	d.duplicates[msg.ReceivedFrom] = peerMap
+	peerlatencyMap, ok := d.duplicateLatency[msg.ReceivedFrom]
+	if !ok {
+		peerlatencyMap = map[string]time.Duration{}
+	}
+	peerlatencyMap[topic] = totalDur / time.Duration(d.duplicates[msg.ReceivedFrom][topic])
+	d.duplicateLatency[msg.ReceivedFrom] = peerlatencyMap
 }
 
 func (d *deliveryTracker) addFirstDelivery(msg *Message, id string) {
