@@ -155,7 +155,12 @@ func (d *deliveryTracker) unChokePeers(unchokedPeers map[peer.ID][]string) {
 }
 
 func (d *deliveryTracker) chokedFromPeer(pid peer.ID, topic string) {
-	d.inboundChokedPeers[pid][topic] = true
+	cPeer, ok := d.inboundChokedPeers[pid]
+	if !ok {
+		cPeer = map[string]bool{}
+	}
+	cPeer[topic] = true
+	d.inboundChokedPeers[pid] = cPeer
 }
 
 func (d *deliveryTracker) unChokedFromPeer(pid peer.ID, topic string) {
