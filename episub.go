@@ -130,12 +130,17 @@ func (d *deliveryTracker) addFirstDelivery(msg *Message, id string) {
 
 func (d *deliveryTracker) chokePeers(chokedPeers map[peer.ID][]string) {
 	for p, topics := range chokedPeers {
+		peerMap, ok := d.chokedPeers[p]
+		if !ok {
+			peerMap = map[string]bool{}
+		}
 		for _, t := range topics {
-			exists := d.chokedPeers[p][t]
+			exists := peerMap[t]
 			if !exists {
-				d.chokedPeers[p][t] = true
+				peerMap[t] = true
 			}
 		}
+		d.chokedPeers[p] = peerMap
 	}
 }
 
