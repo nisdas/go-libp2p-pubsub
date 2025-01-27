@@ -1160,6 +1160,16 @@ func (gs *GossipSubRouter) Publish(msg *Message) {
 				tosend[p] = struct{}{}
 			}
 		}
+	} else if msg.Random {
+		// randomly choose up to D peers to broadcast the message to
+		// within the message threshold
+		peers := gs.getPeers(topic, gs.params.D, func(p peer.ID) bool {
+			return gs.score.Score(p) >= gs.publishThreshold
+		})
+		// Send the message to the selected peers.
+		for _, p := range peers {
+			tosend[p] = struct{}{}
+		}
 	} else {
 		// direct peers
 		for p := range gs.direct {
@@ -1751,7 +1761,7 @@ func (gs *GossipSubRouter) heartbeat() {
 
 		// 2nd arg are mesh peers excluded from gossip. We already push
 		// messages to them, so its redundant to gossip IHAVEs.
-		gs.emitGossip(topic, peers)
+		// gs.emitGossip(topic, peers)
 	}
 
 	// expire fanout for topics we haven't published to in a while
@@ -1790,7 +1800,7 @@ func (gs *GossipSubRouter) heartbeat() {
 
 		// 2nd arg are fanout peers excluded from gossip. We already push
 		// messages to them, so its redundant to gossip IHAVEs.
-		gs.emitGossip(topic, peers)
+		// gs.emitGossip(topic, peers)
 	}
 
 	// send coalesced GRAFT/PRUNE messages (will piggyback gossip)

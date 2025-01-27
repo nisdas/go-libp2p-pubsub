@@ -216,6 +216,7 @@ type PublishOptions struct {
 	ready     RouterReady
 	customKey ProvideKey
 	local     bool
+	random    bool
 }
 
 type PubOpt func(pub *PublishOptions) error
@@ -308,7 +309,7 @@ func (t *Topic) Publish(ctx context.Context, data []byte, opts ...PubOpt) error 
 		}
 	}
 
-	return t.p.val.PushLocal(&Message{m, "", t.p.host.ID(), nil, pub.local})
+	return t.p.val.PushLocal(&Message{m, "", t.p.host.ID(), nil, pub.local, pub.random})
 }
 
 // WithReadiness returns a publishing option for only publishing when the router is ready.
@@ -316,6 +317,13 @@ func (t *Topic) Publish(ctx context.Context, data []byte, opts ...PubOpt) error 
 func WithReadiness(ready RouterReady) PubOpt {
 	return func(pub *PublishOptions) error {
 		pub.ready = ready
+		return nil
+	}
+}
+
+func WithRandomPublishing() PubOpt {
+	return func(pub *PublishOptions) error {
+		pub.random = true
 		return nil
 	}
 }
