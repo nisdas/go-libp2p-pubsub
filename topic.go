@@ -9,6 +9,7 @@ import (
 
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -310,6 +311,62 @@ func (t *Topic) Publish(ctx context.Context, data []byte, opts ...PubOpt) error 
 	}
 
 	return t.p.val.PushLocal(&Message{m, "", t.p.host.ID(), nil, pub.local, pub.random})
+}
+
+// PublishMultiple publishes data to topic.
+func (t *Topic) PublishMultiple(ctx context.Context, multipleData [][]byte, opts ...PubOpt) error {
+	t.mux.RLock()
+	defer t.mux.RUnlock()
+	if t.closed {
+		return ErrTopicClosed
+	}
+
+	pid := t.p.signID
+	key := t.p.signKey
+
+	pub := &PublishOptions{}
+	for _, opt := range opts {
+		err := opt(pub)
+		if err != nil {
+			return err
+		}
+	}
+
+	if pub.customKey != nil && !pub.local {
+		key, pid = pub.customKey()
+		if key == nil {
+			return ErrNilSignKey
+		}
+		if len(pid) == 0 {
+			return ErrEmptyPeerID
+		}
+	}
+	eg, _ := errgroup.WithContext(ctx)
+
+	for _, data := range multipleData {
+		m := &pb.Message{
+			Data:  data,
+			Topic: &t.topic,
+			From:  nil,
+			Seqno: nil,
+		}
+		if pid != "" {
+			m.From = []byte(pid)
+			m.Seqno = t.p.nextSeqno()
+		}
+		if key != nil {
+			m.From = []byte(pid)
+			err := signMessage(pid, key, m)
+			if err != nil {
+				return err
+			}
+		}
+
+		eg.Go(func() error {
+			return t.p.val.PushLocal(&Message{m, "", t.p.host.ID(), nil, pub.local, pub.random})
+		})
+	}
+	return eg.Wait()
 }
 
 // WithReadiness returns a publishing option for only publishing when the router is ready.

@@ -1161,9 +1161,9 @@ func (gs *GossipSubRouter) Publish(msg *Message) {
 			}
 		}
 	} else if msg.Random {
-		// randomly choose up to D peers to broadcast the message to
+		// randomly broadcast to a single peer as long as it is
 		// within the message threshold
-		peers := gs.getPeers(topic, gs.params.D, func(p peer.ID) bool {
+		peers := gs.getPeers(topic, 1, func(p peer.ID) bool {
 			return gs.score.Score(p) >= gs.publishThreshold
 		})
 		// Send the message to the selected peers.
